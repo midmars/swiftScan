@@ -41,7 +41,7 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
 
     let session = AVCaptureSession()
     var previewLayer: AVCaptureVideoPreviewLayer?
-    var stillImageOutput: AVCaptureStillImageOutput
+    var stillImageOutput: AVCapturePhotoOutput
 
     // 存储返回结果
     var arrayResult = [LBXScanResult]()
@@ -57,7 +57,6 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
     
     //连续扫码
     var supportContinuous = false
-    
     
     /**
      初始化设备
@@ -77,7 +76,7 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
         successBlock = success
         output = AVCaptureMetadataOutput()
         isNeedCaptureImage = isCaptureImg
-        stillImageOutput = AVCaptureStillImageOutput()
+        stillImageOutput = AVCapturePhotoOutput()
 
         super.init()
         
@@ -104,8 +103,8 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
         if session.canAddOutput(stillImageOutput) {
             session.addOutput(stillImageOutput)
         }
-
-        stillImageOutput.outputSettings = [AVVideoCodecJPEG: AVVideoCodecKey]
+				let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+				stillImageOutput.photoSettingsForSceneMonitoring = settings
 
         session.sessionPreset = AVCaptureSession.Preset.high
 
@@ -150,7 +149,9 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
     func start() {
         if !session.isRunning {
             isNeedScanResult = true
-            session.startRunning()
+					DispatchQueue.global(qos: .background).async { [weak self] in
+						self?.session.startRunning()
+					}
         }
     }
     
@@ -206,22 +207,12 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
     
     //MARK: ----拍照
     open func captureImage() {
-        guard let stillImageConnection = connectionWithMediaType(mediaType: AVMediaType.video as AVMediaType,
-                                                                 connections: stillImageOutput.connections as [AnyObject]) else {
+			guard connectionWithMediaType(mediaType: AVMediaType.video as AVMediaType,
+																		connections: stillImageOutput.connections as [AnyObject]) != nil else {
                                                                     return
         }
-        stillImageOutput.captureStillImageAsynchronously(from: stillImageConnection, completionHandler: { (imageDataSampleBuffer, _) -> Void in
-            self.stop()
-            if let imageDataSampleBuffer = imageDataSampleBuffer,
-                let imageData = AVCaptureStillImageOutput.jpegStillImageNSDataRepresentation(imageDataSampleBuffer) {
-                
-                let scanImg = UIImage(data: imageData)
-                for idx in 0 ... self.arrayResult.count - 1 {
-                    self.arrayResult[idx].imgScanned = scanImg
-                }
-            }
-            self.successBlock(self.arrayResult)
-        })
+			let outputSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+			stillImageOutput.capturePhoto(with: outputSettings, delegate: self)
     }
     
     open func connectionWithMediaType(mediaType: AVMediaType, connections: [AnyObject]) -> AVCaptureConnection? {
@@ -551,4 +542,17 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
         return UIGraphicsGetImageFromCurrentImageContext()!
     }
     
+}
+
+extension LBXScanWrapper : AVCapturePhotoCaptureDelegate {
+	public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+		self.stop()
+		if let imageData = photo.fileDataRepresentation(), let image = UIImage(data: imageData) {
+			for idx in 0 ... self.arrayResult.count - 1 {
+					self.arrayResult[idx].imgScanned = image
+			}
+			self.successBlock(self.arrayResult)
+		}
+		
+	}
 }
